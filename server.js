@@ -58,12 +58,32 @@ io.on('connection', (socket) => {
         });
     });
 
+    // Handle turn updates
+    socket.on('turnUsed', (turnsRemaining) => {
+        io.emit('turnUpdate', turnsRemaining);
+    });
+
     // Handle hint usage
     socket.on('useHint', (data) => {
         io.emit('hintUpdate', {
             row: data.row,
             col: data.col,
             playerId: socket.id
+        });
+    });
+    
+    // Handle level completion
+    socket.on('levelComplete', (data) => {
+        io.emit('levelComplete', {
+            level: data.level,
+            nextLevelExists: data.nextLevelExists
+        });
+    });
+    
+    // Handle starting next level
+    socket.on('startNextLevel', (data) => {
+        io.emit('nextLevelStarted', {
+            level: data.level
         });
     });
 });
