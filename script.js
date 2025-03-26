@@ -62,6 +62,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (gameStarted) {
             adjustTileSize();
         }
+        
+        // Setup touch controls based on device
+        initializeTouchControls();
     }
     
     function adjustTileSize() {
@@ -299,9 +302,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    socket.on('turnUpdate', (remainingTurns) => {
-        turnsRemaining = remainingTurns;
+    socket.on('turnUpdate', (data) => {
+        turnsRemaining = data.turnsRemaining;
+        currentPlayerIndex = data.currentPlayerIndex;
         updateTurnsDisplay();
+        updatePlayerList();
+        updateTeamMessage(`It's ${players[currentPlayerIndex].name}'s turn now.`);
+        announceForScreenReader(`${players[currentPlayerIndex].name}'s turn`);
     });
 
     socket.on('hintUpdate', (data) => {
@@ -386,13 +393,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Initialize responsive layout
         handleResize();
         
+        // Initialize current player to first player (index 0)
+        currentPlayerIndex = 0;
         updatePlayerList();
         createCoordinateLabels();
         loadLevel(1);
         generateTiles();
-        
-        // Initialize current player to first player and show message
-        currentPlayerIndex = 0;
         
         // Emit initial turn count to all players
         if (socket.id === players[0].id) {
@@ -494,10 +500,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Move to next player's turn
     function nextTurn() {
-        currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
+        // This function is kept for backward compatibility but no longer changes the currentPlayerIndex
+        // The server will tell us whose turn it is next
         updatePlayerList();
-        updateTeamMessage(`It's ${players[currentPlayerIndex].name}'s turn now.`);
-        announceForScreenReader(`${players[currentPlayerIndex].name}'s turn`);
     }
     
     // Reveal a random hint
@@ -582,8 +587,6 @@ document.addEventListener('DOMContentLoaded', () => {
             // Emit turn update to server so all players see it
             socket.emit('turnUsed', turnsRemaining);
             
-            updateTurnsDisplay();
-            
             // Emit tile selection to server
             socket.emit('tileSelect', {
                 row: currentRow,
@@ -631,8 +634,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
-        // Move to next player's turn
-        nextTurn();
+        // NOTE: nextTurn() is no longer called here since the server controls turn order
     }
     
     // Generate the tiles
@@ -655,9 +657,72 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 tile.style.background = getRandomColor();
                 
-                // Handle click events (works for mouse and touch)
+                // Handle click events (works for mouse)
                 tile.addEventListener('click', () => {
                     processTileSelection(tile);
+                });
+                
+                // Enhanced touch controls
+                tile.addEventListener('touchstart', (e) => {
+                    // Prevent default to avoid double-firing with click events
+                    e.preventDefault();
+                    
+                    // Store touch start time for long press detection
+                    tile.touchStartTime = Date.now();
+                    tile.touchStarted = true;
+                    
+                    // Show coordinate tooltip on touch start
+                    const tooltip = document.createElement('div');
+                    tooltip.className = 'touch-tooltip';
+                    tooltip.textContent = tile.dataset.coord;
+                    tile.appendChild(tooltip);
+                }, { passive: false });
+                
+                tile.addEventListener('touchend', (e) => {
+                    // Remove any tooltips
+                    const tooltip = tile.querySelector('.touch-tooltip');
+                    if (tooltip) tooltip.remove();
+                    
+                    // Check for long press (for hint functionality)
+                    const touchDuration = Date.now() - (tile.touchStartTime || 0);
+                    if (touchDuration >= 500 && hintsRemaining > 0) {
+                        // Long press detected, show hint dialog
+                        if (confirm('Use a hint on this tile?')) {
+                            // Use hint at this location
+                            const row = parseInt(tile.dataset.row);
+                            const col = parseInt(tile.dataset.col);
+                            socket.emit('useHint', { row, col });
+                            
+                            hintsRemaining--;
+                            hintCounter.textContent = hintsRemaining;
+                            if (hintsRemaining === 0) {
+                                hintButton.disabled = true;
+                            }
+                        }
+                    } else if (tile.touchStarted) {
+                        // Normal touch - process tile selection
+                        processTileSelection(tile);
+                    }
+                    
+                    tile.touchStarted = false;
+                });
+                
+                tile.addEventListener('touchmove', (e) => {
+                    // Cancel the touch action if the finger moves too much
+                    const touch = e.touches[0];
+                    const tileRect = tile.getBoundingClientRect();
+                    const touchX = touch.clientX;
+                    const touchY = touch.clientY;
+                    
+                    // If touch moves outside the tile, cancel the touch action
+                    if (touchX < tileRect.left || touchX > tileRect.right || 
+                        touchY < tileRect.top || touchY > tileRect.bottom) {
+                        tile.touchStarted = false;
+                        
+                        // Remove any tooltips
+                        const tooltip = tile.querySelector('.touch-tooltip');
+                        if (tooltip) tooltip.remove();
+                    }
                 });
                 
                 // Add keyboard handling for accessibility
@@ -855,6 +920,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateTurnsDisplay();
         
         // Broadcast initial turn count to all players
+        // Only the first player should emit to avoid multiple events
         if (socket.id === players[0].id) {
             socket.emit('turnUsed', turnsRemaining);
         }
@@ -1090,6 +1156,185 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => {
                 teamMessage.classList.remove('message-highlight');
             }, 2000);
+        }
+    }
+
+    // Add swipe detection for grid navigation on mobile/tablet
+    function initializeSwipeNavigation() {
+        if (!isMobileDevice) return;
+        
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let currentFocusedTile = null;
+        
+        tileGrid.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            
+            // Find the currently focused tile
+            currentFocusedTile = document.querySelector('.tile[tabindex="0"]');
+            if (!currentFocusedTile && tileGrid.firstChild) {
+                // If no tile is focused, set focus to the first tile
+                tileGrid.firstChild.setAttribute('tabindex', '0');
+                currentFocusedTile = tileGrid.firstChild;
+                focusedRow = parseInt(currentFocusedTile.dataset.row) || 0;
+                focusedCol = parseInt(currentFocusedTile.dataset.col) || 0;
+            }
+        }, { passive: true });
+        
+        tileGrid.addEventListener('touchend', (e) => {
+            if (!currentFocusedTile) return;
+            
+            const touchEndX = e.changedTouches[0].clientX;
+            const touchEndY = e.changedTouches[0].clientY;
+            
+            const deltaX = touchEndX - touchStartX;
+            const deltaY = touchEndY - touchStartY;
+            
+            // Detect swipe direction (if the movement is significant)
+            const minSwipeDistance = 50; // Minimum distance for a swipe
+            
+            if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
+                // Horizontal swipe
+                if (deltaX > 0) {
+                    // Swipe right
+                    navigateGrid('ArrowRight', focusedRow, focusedCol);
+                } else {
+                    // Swipe left
+                    navigateGrid('ArrowLeft', focusedRow, focusedCol);
+                }
+            } else if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > minSwipeDistance) {
+                // Vertical swipe
+                if (deltaY > 0) {
+                    // Swipe down
+                    navigateGrid('ArrowDown', focusedRow, focusedCol);
+                } else {
+                    // Swipe up
+                    navigateGrid('ArrowUp', focusedRow, focusedCol);
+                }
+            }
+        }, { passive: true });
+    }
+
+    // Add double-tap support for zoom/focus on mobile
+    function initializeDoubleTapZoom() {
+        if (!isMobileDevice) return;
+        
+        let lastTap = 0;
+        let tapTimeout;
+        
+        tileGrid.addEventListener('touchend', (e) => {
+            const currentTime = Date.now();
+            const tapLength = currentTime - lastTap;
+            
+            clearTimeout(tapTimeout);
+            
+            if (tapLength < 300 && tapLength > 0) {
+                // Double tap detected
+                e.preventDefault();
+                
+                // Find the tile that was tapped
+                const touch = e.changedTouches[0];
+                const element = document.elementFromPoint(touch.clientX, touch.clientY);
+                
+                if (element && element.classList.contains('tile')) {
+                    // Zoom effect on double tap
+                    element.classList.add('zoomed');
+                    
+                    // Remove zoom after a short delay
+                    setTimeout(() => {
+                        element.classList.remove('zoomed');
+                    }, 1000);
+                }
+            } else {
+                // This is a single tap, wait to see if it becomes a double tap
+                tapTimeout = setTimeout(() => {
+                    // Single tap behavior can go here if needed
+                }, 300);
+            }
+            
+            lastTap = currentTime;
+        });
+    }
+
+    // Add pinch-zoom support for the grid on mobile
+    function initializePinchZoom() {
+        if (!isMobileDevice) return;
+        
+        let initialDistance = 0;
+        let initialScale = 1;
+        let currentScale = 1;
+        const MIN_SCALE = 0.8;
+        const MAX_SCALE = 1.5;
+        
+        const gridContainer = document.querySelector('.grid-container');
+        
+        gridContainer.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                // Two finger touch - potential pinch
+                initialDistance = getDistance(
+                    e.touches[0].clientX, e.touches[0].clientY,
+                    e.touches[1].clientX, e.touches[1].clientY
+                );
+                initialScale = currentScale;
+            }
+        }, { passive: true });
+        
+        gridContainer.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2) {
+                // Calculate new distance between touch points
+                const currentDistance = getDistance(
+                    e.touches[0].clientX, e.touches[0].clientY,
+                    e.touches[1].clientX, e.touches[1].clientY
+                );
+                
+                // Calculate scale factor
+                let newScale = initialScale * (currentDistance / initialDistance);
+                
+                // Limit scale to reasonable values
+                newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
+                
+                // Apply scale transform to grid
+                tileGrid.style.transform = `scale(${newScale})`;
+                currentScale = newScale;
+                
+                // Prevent default to avoid page scaling
+                e.preventDefault();
+            }
+        }, { passive: false });
+        
+        gridContainer.addEventListener('touchend', (e) => {
+            if (e.touches.length < 2) {
+                // End of pinch gesture
+                // Optional: animate back to normal scale if needed
+                if (currentScale < 0.9) {
+                    tileGrid.style.transition = 'transform 0.3s ease-out';
+                    tileGrid.style.transform = 'scale(1)';
+                    currentScale = 1;
+                    
+                    setTimeout(() => {
+                        tileGrid.style.transition = '';
+                    }, 300);
+                }
+            }
+        }, { passive: true });
+        
+        // Helper function to calculate distance between two points
+        function getDistance(x1, y1, x2, y2) {
+            return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+        }
+    }
+
+    // Initialize touch controls
+    function initializeTouchControls() {
+        // Add to existing handleResize function or call separately
+        if (isMobileDevice) {
+            document.body.classList.add('touch-device');
+            initializeSwipeNavigation();
+            initializeDoubleTapZoom();
+            initializePinchZoom();
+        } else {
+            document.body.classList.remove('touch-device');
         }
     }
 }); 
