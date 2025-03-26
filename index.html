@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mosaic Tile</title>
+    <link rel="stylesheet" href="styles.css">
+    <meta name="description" content="Team Mosaic - A collaborative puzzle game where players work together to uncover hidden patterns">
+</head>
+<body>
+    <!-- Name Entry Screen -->
+    <div id="nameScreen" class="screen" role="dialog" aria-labelledby="gameTitle">
+        <div class="entry-container">
+            <h1 id="gameTitle">Team Mosaic</h1>
+            <p class="game-subtitle">Work together, solve together! 🤝</p>
+            <div class="team-rules">
+                <h3>Team Rules:</h3>
+                <ul>
+                    <li>🎯 Find the hidden pattern together</li>
+                    <li>💡 Share hints with your teammates</li>
+                    <li>🗣️ Communicate and strategize</li>
+                    <li>🌟 Celebrate each discovery!</li>
+                </ul>
+            </div>
+            <div class="name-entry">
+                <label for="playerNameInput" class="sr-only">Enter your name</label>
+                <input type="text" id="playerNameInput" placeholder="Enter your name" maxlength="15" class="name-input" aria-required="true">
+                <button id="joinGameBtn" class="join-button" aria-label="Join team with your entered name">Join Team</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Waiting Room Screen -->
+    <div id="waitingRoom" class="screen" style="display: none;" role="dialog" aria-labelledby="waitingRoomTitle">
+        <div class="waiting-container">
+            <h2 id="waitingRoomTitle">Team Assembly</h2>
+            <div class="team-formation">
+                <div class="team-circle">
+                    <div class="player-list-waiting" id="waitingPlayerList" aria-live="polite">
+                        <!-- Waiting players will be added here -->
+                    </div>
+                </div>
+            </div>
+            <div class="waiting-status">
+                <p class="team-count"><span id="playerCount">1</span>/4 teammates</p>
+                <p class="waiting-message" aria-live="polite">Gathering your team...</p>
+            </div>
+            <button id="startGameBtn" class="start-button" disabled aria-label="Start mission when team is ready">Start Mission</button>
+            <div class="team-tip">
+                <p>💡 Tip: Use this time to say hi to your teammates!</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="gameScreen" class="screen" style="display: none;" role="main">
+        <div class="game-container">
+            <div class="player-panel">
+                <h2>Team Status</h2>
+                <div class="level-card">
+                    <h3>Current Level</h3>
+                    <div class="level-display">
+                        <span id="levelCounter" aria-live="polite">1</span>
+                    </div>
+                    <div class="level-message" id="levelMessage" aria-live="polite">
+                        Starting with the basics!
+                    </div>
+                </div>
+                <div id="playerList" class="player-list" aria-label="Player list" role="list">
+                    <!-- Players will be added here -->
+                </div>
+                <div class="turns-card">
+                    <h3>Turns Remaining</h3>
+                    <div class="turns-display">
+                        <span id="turnsCounter" aria-live="polite">45</span>
+                    </div>
+                    <div class="turns-message" id="turnsMessage" aria-live="polite">
+                        Use your turns wisely!
+                    </div>
+                </div>
+                <div class="hint-card">
+                    <h3>Team Power-Ups</h3>
+                    <div class="hint-content">
+                        <div class="hint-count">
+                            <span id="hintCounter" aria-live="polite">3</span> team hints remaining
+                        </div>
+                        <button id="hintButton" class="hint-button" disabled aria-label="Share a hint with your team">Share Hint</button>
+                    </div>
+                    <div class="team-message" id="teamMessage" aria-live="polite">
+                        Work together to uncover the pattern!
+                    </div>
+                </div>
+                <div class="control-buttons">
+                    <button id="restartButton" class="restart-button" style="display: none;" aria-label="Try this level again">Try Again</button>
+                    <button id="nextLevelButton" class="next-level-button" style="display: none;" aria-label="Proceed to next level">Next Level</button>
+                </div>
+            </div>
+            <div class="container">
+                <h1>Team Mosaic</h1>
+                <div class="grid-container">
+                    <div class="column-labels" id="columnLabels" aria-hidden="true">
+                        <!-- Column labels (A-O) will be generated by JavaScript -->
+                    </div>
+                    <div class="grid-with-rows">
+                        <div class="row-labels" id="rowLabels" aria-hidden="true">
+                            <!-- Row labels (1-15) will be generated by JavaScript -->
+                        </div>
+                        <div class="tile-grid" id="tileGrid" role="grid" aria-label="Mosaic tile grid">
+                            <!-- Tiles will be generated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html> 
