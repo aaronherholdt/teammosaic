@@ -8,6 +8,8 @@ app.use(express.static('./'));
 
 // Store connected players
 let players = [];
+// Track current player index
+let currentPlayerIndex = 0;
 
 io.on('connection', (socket) => {
     console.log('A user connected');
@@ -44,6 +46,8 @@ io.on('connection', (socket) => {
     // Handle game start
     socket.on('startGame', () => {
         if (players.length >= 2 && players.length <= 4) {
+            // Reset current player index to 0 when game starts
+            currentPlayerIndex = 0;
             io.emit('gameStart', players);
         }
     });
@@ -60,7 +64,14 @@ io.on('connection', (socket) => {
 
     // Handle turn updates
     socket.on('turnUsed', (turnsRemaining) => {
-        io.emit('turnUpdate', turnsRemaining);
+        // Advance to next player
+        currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
+        
+        // Broadcast both turns remaining and current player index
+        io.emit('turnUpdate', {
+            turnsRemaining: turnsRemaining,
+            currentPlayerIndex: currentPlayerIndex
+        });
     });
 
     // Handle hint usage
@@ -74,6 +85,8 @@ io.on('connection', (socket) => {
     
     // Handle level completion
     socket.on('levelComplete', (data) => {
+        // Reset current player index for next level
+        currentPlayerIndex = 0;
         io.emit('levelComplete', {
             level: data.level,
             nextLevelExists: data.nextLevelExists
