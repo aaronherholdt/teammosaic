@@ -35,6 +35,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let turnsRemaining = totalTurns;
     let isMobileDevice = window.innerWidth < 768;
     
+    // Team achievements tracking
+    let teamAchievements = {
+        discoveries: 0,
+        hintsShared: 0,
+        consecutiveFinds: 0
+    };
+    
     // Add responsive resize handler
     window.addEventListener('resize', handleResize);
     
@@ -91,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 { row: 10, col: 12 }, { row: 9, col: 12 }, { row: 8, col: 11 }  // Right smile
             ],
             turns: 100,
-            message: "Welcome to Team Mosaic! Let's start with something simple!"
+            message: "Welcome to Team Mosaic! Your team has 100 turns total. Use them wisely!"
         },
         2: {
             pattern: [
@@ -110,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 { row: 12, col: 4 }, { row: 12, col: 11 }
             ],
             turns: 90,
-            message: "Getting warmed up! This one's a bit trickier!"
+            message: "Getting warmed up! Your team has 90 shared turns for this level."
         },
         3: {
             pattern: [
@@ -132,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 { row: 12, col: 7 }, { row: 12, col: 8 }
             ],
             turns: 80,
-            message: "Now we're getting somewhere! Can you spot the pattern?"
+            message: "Now we're getting somewhere! 80 team turns for this challenge."
         },
         4: {
             pattern: [
@@ -150,7 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 { row: 12, col: 7 }  // Bottom point
             ],
             turns: 70,
-            message: "This one requires careful observation!"
+            message: "This one requires careful observation! Your team has 70 turns total."
         },
         5: {
             pattern: [
@@ -292,6 +299,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    socket.on('turnUpdate', (remainingTurns) => {
+        turnsRemaining = remainingTurns;
+        updateTurnsDisplay();
+    });
+
     socket.on('hintUpdate', (data) => {
         const tile = document.querySelector(`[data-row="${data.row}"][data-col="${data.col}"]`);
         if (tile) {
@@ -378,6 +390,17 @@ document.addEventListener('DOMContentLoaded', () => {
         createCoordinateLabels();
         loadLevel(1);
         generateTiles();
+        
+        // Initialize current player to first player and show message
+        currentPlayerIndex = 0;
+        
+        // Emit initial turn count to all players
+        if (socket.id === players[0].id) {
+            socket.emit('turnUsed', turnsRemaining);
+        }
+        
+        updateTeamMessage(`Game started! It's ${players[currentPlayerIndex].name}'s turn first. Your team has ${turnsRemaining} total turns.`);
+        announceForScreenReader(`Game started! It's ${players[currentPlayerIndex].name}'s turn first. Your team has ${turnsRemaining} total turns.`);
     }
     
     // Define grid size
@@ -473,6 +496,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function nextTurn() {
         currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
         updatePlayerList();
+        updateTeamMessage(`It's ${players[currentPlayerIndex].name}'s turn now.`);
         announceForScreenReader(`${players[currentPlayerIndex].name}'s turn`);
     }
     
@@ -537,8 +561,27 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // If isPattern is null, this is a local click
         if (isPattern === null) {
+            // Check if it's this player's turn
+            if (socket.id !== players[currentPlayerIndex].id) {
+                // Not this player's turn
+                const currentPlayerName = players[currentPlayerIndex].name;
+                updateTeamMessage(`It's ${currentPlayerName}'s turn now. Please wait for your turn.`);
+                
+                // Add a subtle shake animation to indicate it's not the player's turn
+                tile.classList.add('not-your-turn');
+                setTimeout(() => {
+                    tile.classList.remove('not-your-turn');
+                }, 500);
+                
+                return;
+            }
+            
             // Decrease turns with every click
             turnsRemaining--;
+            
+            // Emit turn update to server so all players see it
+            socket.emit('turnUsed', turnsRemaining);
+            
             updateTurnsDisplay();
             
             // Emit tile selection to server
@@ -730,6 +773,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 hintButton.disabled = true;
                 hintsRemaining = 3;
                 hintCounter.textContent = hintsRemaining;
+                
+                // Emit level completion event to server so all players see it
+                socket.emit('levelComplete', {
+                    level: currentLevel,
+                    nextLevelExists: nextLevelExists
+                });
             }, 1000);
 
             return true;
@@ -759,15 +808,15 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (turnsRemaining <= 5) {
             turnsCard.classList.add('low-turns');
-            turnsMessage.textContent = '⚠️ Final turns! Make them count!';
+            turnsMessage.textContent = '⚠️ Final team turns! Make them count!';
         } else if (turnsRemaining <= 10) {
             turnsCard.classList.add('low-turns');
-            turnsMessage.textContent = 'Hurry! Turns are running out!';
+            turnsMessage.textContent = 'Hurry! Team turns are running out!';
         } else if (turnsRemaining <= 20) {
-            turnsMessage.textContent = 'Choose carefully! Every click counts!';
+            turnsMessage.textContent = 'Choose carefully! Every team turn counts!';
         } else {
             turnsCard.classList.remove('low-turns');
-            turnsMessage.textContent = 'Use your turns wisely!';
+            turnsMessage.textContent = 'Use your team turns wisely!';
         }
     }
 
@@ -805,6 +854,11 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('hintCounter').textContent = hintsRemaining;
         updateTurnsDisplay();
         
+        // Broadcast initial turn count to all players
+        if (socket.id === players[0].id) {
+            socket.emit('turnUsed', turnsRemaining);
+        }
+        
         // Announce level load for screen readers
         announceForScreenReader(`Level ${level} loaded. ${config.message}`);
         
@@ -831,6 +885,11 @@ document.addEventListener('DOMContentLoaded', () => {
             generateTiles();
             updatePlayerList();
             announceForScreenReader(`Starting level ${currentLevel}. You have ${totalTurns} turns.`);
+            
+            // Emit next level event to server so all players transition
+            socket.emit('startNextLevel', {
+                level: currentLevel
+            });
         } else {
             alert("Congratulations! You've completed all levels! 🎉");
             announceForScreenReader("Congratulations! You've completed all levels!");
@@ -886,6 +945,34 @@ document.addEventListener('DOMContentLoaded', () => {
             0% { transform: scale(1); }
             50% { transform: scale(1.05); box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3); }
             100% { transform: scale(1); }
+        }
+        
+        /* Not your turn animation */
+        .not-your-turn {
+            animation: shakeTile 0.5s ease-in-out;
+            border: 2px solid #ff3232 !important;
+        }
+        
+        @keyframes shakeTile {
+            0% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            50% { transform: translateX(5px); }
+            75% { transform: translateX(-3px); }
+            100% { transform: translateX(0); }
+        }
+        
+        /* Message highlight animation */
+        .message-highlight {
+            animation: highlightMessage 2s ease-in-out;
+            background-color: rgba(255, 255, 0, 0.2) !important;
+            color: #ffffff !important;
+            font-weight: bold;
+        }
+        
+        @keyframes highlightMessage {
+            0% { transform: scale(1); background-color: rgba(255, 255, 0, 0.2); }
+            50% { transform: scale(1.05); background-color: rgba(255, 255, 0, 0.3); }
+            100% { transform: scale(1); background-color: rgba(255, 255, 0, 0.2); }
         }
         
         /* Screen reader only class */
@@ -968,4 +1055,41 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize the game layout
     handleResize();
+
+    // Add socket event handlers for level transitions
+    socket.on('levelComplete', (data) => {
+        // This event is received by all players when any player completes a level
+        if (gameStarted) {
+            endGame(true);
+            gameStarted = false;
+            hintButton.disabled = true;
+            hintsRemaining = 3;
+            hintCounter.textContent = hintsRemaining;
+        }
+    });
+
+    socket.on('nextLevelStarted', (data) => {
+        // This event is received by all players when any player starts the next level
+        if (!gameStarted) {
+            loadLevel(data.level);
+            gameStarted = true;
+            hintButton.disabled = false;
+            restartButton.style.display = 'none';
+            nextLevelButton.style.display = 'none';
+            generateTiles();
+            updatePlayerList();
+        }
+    });
+
+    // Function to update team message
+    function updateTeamMessage(message) {
+        const teamMessage = document.getElementById('teamMessage');
+        if (teamMessage) {
+            teamMessage.textContent = message;
+            teamMessage.classList.add('message-highlight');
+            setTimeout(() => {
+                teamMessage.classList.remove('message-highlight');
+            }, 2000);
+        }
+    }
 }); 
