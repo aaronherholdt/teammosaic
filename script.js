@@ -31,8 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let gameStarted = false;
     let hintsRemaining = 3;
     let currentLevel = 1;
-    let totalTurns = 45;
-    let turnsRemaining = totalTurns;
+    let turnsRemaining = 0; // Updated by server
     let isMobileDevice = window.innerWidth < 768;
     
     // Team achievements tracking
@@ -288,8 +287,11 @@ document.addEventListener('DOMContentLoaded', () => {
         startGameBtn.disabled = true;
     });
 
-    socket.on('gameStart', (gamePlayers) => {
-        players = gamePlayers;
+    socket.on('gameStart', (gameState) => {
+        players = gameState.players;
+        currentLevel = gameState.currentLevel;
+        turnsRemaining = gameState.turnsRemaining;
+        currentPlayerIndex = 0;
         waitingRoom.style.display = 'none';
         gameScreen.style.display = 'flex';
         startGame();
@@ -311,30 +313,61 @@ document.addEventListener('DOMContentLoaded', () => {
         announceForScreenReader(`${players[currentPlayerIndex].name}'s turn`);
     });
 
+    socket.on('notYourTurn', () => {
+        updateTeamMessage("It's not your turn yet! Please wait.");
+    });
+
+    socket.on('gameOver', () => {
+        endGame(false);
+    });
+
+    socket.on('nextLevelStarted', (data) => {
+        currentLevel = data.level;
+        turnsRemaining = data.turnsRemaining;
+        loadLevel(currentLevel);
+        generateTiles();
+        updateTurnsDisplay();
+        updatePlayerList();
+        announceForScreenReader(`Starting level ${currentLevel}. You have ${turnsRemaining} turns.`);
+    });
+
+    socket.on('gameComplete', () => {
+        updateTeamMessage("Congratulations! You've completed all levels! 🎉");
+        gameStarted = false;
+        hintButton.disabled = true;
+    });
+
     socket.on('hintUpdate', (data) => {
         const tile = document.querySelector(`[data-row="${data.row}"][data-col="${data.col}"]`);
         if (tile) {
+            // Reveal the tile
+            tile.style.background = 'linear-gradient(45deg, #000000, #2d3436)';
+            tile.classList.add('revealed');
+            tile.setAttribute('aria-label', `Tile ${getCoordNotation(data.row, data.col)} - Pattern piece revealed by hint`);
+            discoveredTiles.add(`${data.row}-${data.col}`);
+
+            // Add visual effects (optional)
             tile.classList.add('hint-flash');
-            // Add sparkle effect on hint
             const sparkle = document.createElement('div');
             sparkle.className = 'sparkle';
             tile.appendChild(sparkle);
-            
+
             setTimeout(() => {
                 tile.classList.remove('hint-flash');
                 if (sparkle && sparkle.parentNode) {
                     sparkle.remove();
                 }
             }, 1000);
-            
-            // Only decrease hints on the player who shared the hint
-            if (data.playerId === socket.id) {
-                hintsRemaining--;
-                hintCounter.textContent = hintsRemaining;
-                if (hintsRemaining <= 0) {
-                    hintButton.disabled = true;
-                }
+
+            // Decrease hints for all players (team resource)
+            hintsRemaining--;
+            hintCounter.textContent = hintsRemaining;
+            if (hintsRemaining <= 0) {
+                hintButton.disabled = true;
             }
+
+            // Check if pattern is complete
+            checkPatternCompletion();
         }
     });
 
@@ -408,24 +441,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function startGame() {
         gameStarted = true;
         hintButton.disabled = false;
-        
-        // Initialize responsive layout
         handleResize();
-        
-        // Initialize current player to first player (index 0)
-        currentPlayerIndex = 0;
         updatePlayerList();
         createCoordinateLabels();
-        loadLevel(1);
+        loadLevel(currentLevel);
         generateTiles();
-        
-        // Emit initial turn count to all players
-        if (socket.id === players[0].id) {
-            socket.emit('turnUsed', turnsRemaining);
-        }
-        
-        updateTeamMessage(`Game started! It's ${players[currentPlayerIndex].name}'s turn first. Your team has ${turnsRemaining} total turns.`);
-        announceForScreenReader(`Game started! It's ${players[currentPlayerIndex].name}'s turn first. Your team has ${turnsRemaining} total turns.`);
+        updateTeamMessage(`Game started! It's ${players[currentPlayerIndex].name}'s turn. Your team has ${turnsRemaining} turns.`);
+        announceForScreenReader(`Game started! It's ${players[currentPlayerIndex].name}'s turn. Your team has ${turnsRemaining} turns.`);
     }
     
     // Define grid size
@@ -562,81 +584,48 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!gameStarted || tile.classList.contains('revealed') || tile.classList.contains('disabled')) {
             return;
         }
-        
+
         const currentRow = parseInt(tile.dataset.row);
         const currentCol = parseInt(tile.dataset.col);
-        
-        // If isPattern is null, this is a local click
+
         if (isPattern === null) {
-            // Check if it's this player's turn
             if (socket.id !== players[currentPlayerIndex].id) {
-                // Not this player's turn
                 const currentPlayerName = players[currentPlayerIndex].name;
                 updateTeamMessage(`It's ${currentPlayerName}'s turn now. Please wait for your turn.`);
-                
-                // Add a subtle shake animation to indicate it's not the player's turn
                 tile.classList.add('not-your-turn');
-                setTimeout(() => {
-                    tile.classList.remove('not-your-turn');
-                }, 500);
-                
+                setTimeout(() => tile.classList.remove('not-your-turn'), 500);
                 return;
             }
-            
-            // Decrease turns with every click
-            turnsRemaining--;
-            
-            // Emit turn update to server so all players see it
-            socket.emit('turnUsed', turnsRemaining);
-            
-            // Emit tile selection to server
             socket.emit('tileSelect', {
                 row: currentRow,
                 col: currentCol,
                 isPattern: hiddenPattern[currentRow][currentCol] === 1
             });
-            
-            // Process the tile locally
-            isPattern = hiddenPattern[currentRow][currentCol] === 1;
-            playerId = socket.id;
-        }
-        
-        if (isPattern) {
-            // This tile is part of the pattern
-            tile.style.background = 'linear-gradient(45deg, #000000, #2d3436)';
-            tile.classList.add('revealed');
-            tile.setAttribute('aria-label', `Tile ${getCoordNotation(currentRow, currentCol)} - Pattern piece found!`);
-            discoveredTiles.add(`${currentRow}-${currentCol}`);
-            
-            // Update player score if it's the current player
-            if (playerId === socket.id) {
-                const playerIndex = players.findIndex(p => p.id === playerId);
-                if (playerIndex !== -1) {
-                    players[playerIndex].score++;
-                    showScoreAnimation(playerIndex, 1);
-                    updatePlayerList();
-                }
-            }
-            
-            // Check if pattern is complete
-            if (checkPatternCompletion()) {
-                return;
-            }
         } else {
-            // Change to a new random color when clicked
-            tile.style.background = getRandomColor();
-            
-            // Update aria-label to indicate miss
-            tile.setAttribute('aria-label', `Tile ${getCoordNotation(currentRow, currentCol)} - Not part of pattern`);
+            // Process tile update from server
+            if (isPattern) {
+                tile.style.background = 'linear-gradient(45deg, #000000, #2d3436)';
+                tile.classList.add('revealed');
+                tile.setAttribute('aria-label', `Tile ${getCoordNotation(currentRow, currentCol)} - Pattern piece found!`);
+                discoveredTiles.add(`${currentRow}-${currentCol}`);
+
+                if (playerId === socket.id) {
+                    const playerIndex = players.findIndex(p => p.id === playerId);
+                    if (playerIndex !== -1) {
+                        players[playerIndex].score++;
+                        showScoreAnimation(playerIndex, 1);
+                        updatePlayerList();
+                    }
+                }
+
+                if (checkPatternCompletion()) {
+                    return;
+                }
+            } else {
+                tile.style.background = getRandomColor();
+                tile.setAttribute('aria-label', `Tile ${getCoordNotation(currentRow, currentCol)} - Not part of pattern`);
+            }
         }
-        
-        // Check if out of turns
-        if (turnsRemaining <= 0) {
-            endGame(false);
-            return;
-        }
-        
-        // NOTE: nextTurn() is no longer called here since the server controls turn order
     }
     
     // Generate the tiles
@@ -891,45 +880,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const config = levelConfigs[level];
         if (!config) return false;
 
-        // Reset the pattern
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < cols; col++) {
                 hiddenPattern[row][col] = 0;
             }
         }
-
-        // Set new pattern
-        config.pattern.forEach(({row, col}) => {
+        config.pattern.forEach(({ row, col }) => {
             hiddenPattern[row][col] = 1;
         });
 
-        // Update game state
         currentLevel = level;
-        totalTurns = config.turns;
-        turnsRemaining = totalTurns;
         hintsRemaining = 3;
         discoveredTiles.clear();
-        teamAchievements = {
-            discoveries: 0,
-            hintsShared: 0,
-            consecutiveFinds: 0
-        };
+        teamAchievements = { discoveries: 0, hintsShared: 0, consecutiveFinds: 0 };
 
-        // Update UI
         document.getElementById('levelCounter').textContent = level;
         document.getElementById('levelMessage').textContent = config.message;
         document.getElementById('hintCounter').textContent = hintsRemaining;
         updateTurnsDisplay();
-        
-        // Broadcast initial turn count to all players
-        // Only the first player should emit to avoid multiple events
-        if (socket.id === players[0].id) {
-            socket.emit('turnUsed', turnsRemaining);
-        }
-        
-        // Announce level load for screen readers
+
         announceForScreenReader(`Level ${level} loaded. ${config.message}`);
-        
         return true;
     }
 
@@ -1133,19 +1103,6 @@ document.addEventListener('DOMContentLoaded', () => {
             hintButton.disabled = true;
             hintsRemaining = 3;
             hintCounter.textContent = hintsRemaining;
-        }
-    });
-
-    socket.on('nextLevelStarted', (data) => {
-        // This event is received by all players when any player starts the next level
-        if (!gameStarted) {
-            loadLevel(data.level);
-            gameStarted = true;
-            hintButton.disabled = false;
-            restartButton.style.display = 'none';
-            nextLevelButton.style.display = 'none';
-            generateTiles();
-            updatePlayerList();
         }
     });
 
