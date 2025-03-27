@@ -597,6 +597,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             socket.emit('tileSelect', {
+                level: currentLevel,
                 row: currentRow,
                 col: currentCol,
                 isPattern: hiddenPattern[currentRow][currentCol] === 1
