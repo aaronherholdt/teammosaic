@@ -315,7 +315,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const tile = document.querySelector(`[data-row="${data.row}"][data-col="${data.col}"]`);
         if (tile) {
             tile.classList.add('hint-flash');
-            setTimeout(() => tile.classList.remove('hint-flash'), 1000);
+            // Add sparkle effect on hint
+            const sparkle = document.createElement('div');
+            sparkle.className = 'sparkle';
+            tile.appendChild(sparkle);
+            
+            setTimeout(() => {
+                tile.classList.remove('hint-flash');
+                if (sparkle && sparkle.parentNode) {
+                    sparkle.remove();
+                }
+            }, 1000);
+            
+            // Only decrease hints on the player who shared the hint
+            if (data.playerId === socket.id) {
+                hintsRemaining--;
+                hintCounter.textContent = hintsRemaining;
+                if (hintsRemaining <= 0) {
+                    hintButton.disabled = true;
+                }
+            }
         }
     });
 
@@ -523,33 +542,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const randomIndex = Math.floor(Math.random() * unrevealedPatternTiles.length);
         const { row, col } = unrevealedPatternTiles[randomIndex];
         
-        // Emit hint to server
-        socket.emit('useHint', { row, col });
+        // Emit hint to server with player ID
+        socket.emit('useHint', { row, col, playerId: socket.id });
         
-        // Process hint locally
-        const tile = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
-        tile.classList.add('hint-flash');
-        tile.style.animation = 'hintPulse 1s ease-in-out';
-        
-        // Add sparkle effect
-        const sparkle = document.createElement('div');
-        sparkle.className = 'sparkle';
-        tile.appendChild(sparkle);
+        // Don't process hint locally - let the server broadcast it back
+        // to ensure consistency across all clients
         
         // Announce hint location for screen readers
         announceForScreenReader(`Hint revealed at position ${getCoordNotation(row, col)}`);
         
-        setTimeout(() => {
-            tile.classList.remove('hint-flash');
-            tile.style.animation = '';
-            sparkle.remove();
-        }, 1000);
-        
-        hintsRemaining--;
-        hintCounter.textContent = hintsRemaining;
-        if (hintsRemaining === 0) {
-            hintButton.disabled = true;
-        }
+        // Note: hintsRemaining is now decremented in the hintUpdate socket handler
     }
     
     // Hint button click handler
