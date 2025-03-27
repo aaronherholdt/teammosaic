@@ -6,10 +6,25 @@ const io = require('socket.io')(http);
 // Serve static files from the current directory
 app.use(express.static('./'));
 
-// Store connected players
+// Game state
 let players = [];
-// Track current player index
 let currentPlayerIndex = 0;
+let currentLevel = 1;
+let turnsRemaining = 0;
+
+// Level configurations (consistent with client)
+const levelConfigs = {
+    1: { turns: 100 },
+    2: { turns: 90 },
+    3: { turns: 80 },
+    4: { turns: 70 },
+    5: { turns: 60 },
+    6: { turns: 50 },
+    7: { turns: 40 },
+    8: { turns: 30 },
+    9: { turns: 20 },
+    10: { turns: 10 }
+};
 
 io.on('connection', (socket) => {
     console.log('A user connected');
@@ -46,32 +61,32 @@ io.on('connection', (socket) => {
     // Handle game start
     socket.on('startGame', () => {
         if (players.length >= 2 && players.length <= 4) {
-            // Reset current player index to 0 when game starts
+            currentLevel = 1;
+            turnsRemaining = levelConfigs[currentLevel].turns;
             currentPlayerIndex = 0;
-            io.emit('gameStart', players);
+            io.emit('gameStart', { players, currentLevel, turnsRemaining });
         }
     });
 
     // Handle tile selection
     socket.on('tileSelect', (data) => {
-        io.emit('tileUpdate', {
-            row: data.row,
-            col: data.col,
-            playerId: socket.id,
-            isPattern: data.isPattern
-        });
-    });
-
-    // Handle turn updates
-    socket.on('turnUsed', (turnsRemaining) => {
-        // Advance to next player
-        currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
-        
-        // Broadcast both turns remaining and current player index
-        io.emit('turnUpdate', {
-            turnsRemaining: turnsRemaining,
-            currentPlayerIndex: currentPlayerIndex
-        });
+        if (socket.id === players[currentPlayerIndex].id) {
+            // Valid turn
+            io.emit('tileUpdate', {
+                row: data.row,
+                col: data.col,
+                isPattern: data.isPattern,
+                playerId: socket.id
+            });
+            turnsRemaining--;
+            currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
+            io.emit('turnUpdate', { turnsRemaining, currentPlayerIndex });
+            if (turnsRemaining <= 0) {
+                io.emit('gameOver');
+            }
+        } else {
+            socket.emit('notYourTurn');
+        }
     });
 
     // Handle hint usage
@@ -79,25 +94,20 @@ io.on('connection', (socket) => {
         io.emit('hintUpdate', {
             row: data.row,
             col: data.col,
-            playerId: data.playerId
+            playerId: socket.id
         });
     });
     
     // Handle level completion
     socket.on('levelComplete', (data) => {
-        // Reset current player index for next level
-        currentPlayerIndex = 0;
-        io.emit('levelComplete', {
-            level: data.level,
-            nextLevelExists: data.nextLevelExists
-        });
-    });
-    
-    // Handle starting next level
-    socket.on('startNextLevel', (data) => {
-        io.emit('nextLevelStarted', {
-            level: data.level
-        });
+        if (data.nextLevelExists) {
+            currentLevel++;
+            turnsRemaining = levelConfigs[currentLevel].turns;
+            currentPlayerIndex = 0;
+            io.emit('nextLevelStarted', { level: currentLevel, turnsRemaining });
+        } else {
+            io.emit('gameComplete');
+        }
     });
 });
 
