@@ -70,13 +70,18 @@ io.on('connection', (socket) => {
 
     // Handle tile selection
     socket.on('tileSelect', (data) => {
+        if (data.level !== currentLevel) {
+            socket.emit('invalidSelection', { message: 'Level mismatch. Please wait for the level to update.' });
+            return;
+        }
         if (socket.id === players[currentPlayerIndex].id) {
             // Valid turn
             io.emit('tileUpdate', {
                 row: data.row,
                 col: data.col,
                 isPattern: data.isPattern,
-                playerId: socket.id
+                playerId: socket.id,
+                level: data.level
             });
             turnsRemaining--;
             currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
@@ -103,7 +108,6 @@ io.on('connection', (socket) => {
         if (data.nextLevelExists) {
             currentLevel++;
             turnsRemaining = levelConfigs[currentLevel].turns;
-            currentPlayerIndex = 0;
             io.emit('nextLevelStarted', { level: currentLevel, turnsRemaining });
         } else {
             io.emit('gameComplete');
