@@ -79,7 +79,7 @@ io.on('connection', (socket) => {
         io.emit('hintUpdate', {
             row: data.row,
             col: data.col,
-            playerId: socket.id
+            playerId: data.playerId
         });
     });
     
